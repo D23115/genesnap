@@ -7,6 +7,7 @@ import traceback
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QCursor
 
 import config
 from screenshot_overlay import ScreenshotOverlay
@@ -66,8 +67,18 @@ class GeneSnapApp:
         quit_action.triggered.connect(self.quit)
         menu.addAction(quit_action)
         self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self._on_tray_activated)
         self.tray.show()
         self._register_hotkey()
+
+    def _on_tray_activated(self, reason):
+        # 左键点击也弹出菜单
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.Context,
+        ):
+            if self.tray and self.tray.contextMenu():
+                self.tray.contextMenu().popup(QCursor.pos())
 
     def _init_ocr(self):
         """启动后台 OCR 初始化，显示加载进度对话框"""
@@ -317,7 +328,11 @@ class GeneSnapApp:
         except Exception:
             pass
         self._cleanup_overlay()
+        if self.tray:
+            self.tray.hide()
         self.app.quit()
+        # 强制退出进程（防止 keyboard hook 残留）
+        os._exit(0)
 
 
 def main():
