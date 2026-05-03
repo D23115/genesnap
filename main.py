@@ -1,15 +1,16 @@
 """GeneSnap — 基因截图管理工具 程序入口"""
 
 import sys
+import os
 import traceback
 
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import Qt, QTimer
 
 import config
 from screenshot_overlay import ScreenshotOverlay
-from ocr_engine import ocr_image, OcrInitWorker, is_ocr_ready
+from ocr_engine import ocr_image, start_init, get_init_status, is_ocr_ready
 from info_extractor import extract_order_info
 from excel_manager import find_gene_row, get_row_data, write_order_to_cell
 from folder_manager import build_folder_path, get_subfolder
@@ -42,48 +43,14 @@ class GeneSnapApp:
 
         self.tray = None
         self.overlay = None
-        self._ocr_worker = None
-        self._ocr_thread = None
+        self._poll_timer = None
+        self._loading_dlg = None
 
-        # 先显示加载对话框，后台初始化 OCR
-        self._init_ocr()
-
-    def _init_ocr(self):
-        loading = LoadingDialog()
-
-        self._ocr_thread = QThread()
-        self._ocr_worker = OcrInitWorker()
-        self._ocr_worker.moveToThread(self._ocr_thread)
-
-        self._ocr_thread.started.connect(self._ocr_worker.run)
-        self._ocr_worker.status_updated.connect(loading.update_status)
-        self._ocr_worker.finished.connect(
-            lambda ok, msg: self._on_ocr_ready(ok, msg, loading)
-        )
-        self._ocr_thread.finished.connect(self._ocr_worker.deleteLater)
-        self._ocr_thread.finished.connect(self._ocr_thread.deleteLater)
-
-        self._ocr_thread.start()
-        loading.exec()
-
-    def _on_ocr_ready(self, ok: bool, error_msg: str, loading: LoadingDialog):
-        loading.accept()
-        self._ocr_thread.quit()
-        self._ocr_thread.wait()
-        self._ocr_thread = None
-        self._ocr_worker = None
-
-        if not ok:
-            QMessageBox.critical(
-                None, "启动失败",
-                f"OCR 引擎初始化失败:\n{error_msg}\n\n"
-                "请检查网络连接后重新启动程序。"
-            )
-            self.app.quit()
-            return
-
-        # OCR 就绪，显示托盘
+        # 直接显示托盘（让用户知道程序已启动）
         self._setup_tray()
+
+        # 后台初始化 OCR，显示加载进度
+        self._init_ocr()
 
     def _setup_tray(self):
         self.tray = QSystemTrayIcon()
@@ -102,12 +69,50 @@ class GeneSnapApp:
         self.tray.show()
         self._register_hotkey()
 
-        self.tray.showMessage(
-            "GeneSnap",
-            "已就绪，按 Ctrl+Shift+X 开始截图",
-            QSystemTrayIcon.MessageIcon.Information,
-            2000,
-        )
+    def _init_ocr(self):
+        """启动后台 OCR 初始化，显示加载进度对话框"""
+        self._loading_dlg = LoadingDialog()
+        self._loading_dlg.setWindowTitle("GeneSnap - 正在初始化 OCR 引擎")
+        self._loading_dlg.set_progress(-1, "正在启动 OCR 引擎...")
+        self._loading_dlg.show()
+
+        # 启动后台线程
+        start_init()
+
+        # 定时轮询状态（每 200ms）
+        self._poll_timer = QTimer()
+        self._poll_timer.timeout.connect(self._poll_ocr_status)
+        self._poll_timer.start(200)
+
+    def _poll_ocr_status(self):
+        done, ok, status, progress = get_init_status()
+
+        if self._loading_dlg and self._loading_dlg.isVisible():
+            self._loading_dlg.set_progress(progress, status)
+
+        if done:
+            self._poll_timer.stop()
+            self._poll_timer = None
+
+            if self._loading_dlg:
+                self._loading_dlg.close()
+                self._loading_dlg = None
+
+            if not ok:
+                QMessageBox.critical(
+                    None, "启动失败",
+                    f"OCR 引擎初始化失败:\n{status}\n\n"
+                    "程序将以手动输入模式运行。\n"
+                    "请检查网络连接后重新启动。"
+                )
+                # 不退出，允许手动输入模式
+            else:
+                self.tray.showMessage(
+                    "GeneSnap",
+                    "OCR 引擎就绪，按 Ctrl+Shift+X 开始截图",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    2000,
+                )
 
     def _register_hotkey(self):
         try:
@@ -316,7 +321,6 @@ class GeneSnapApp:
 
 
 def main():
-    import os
     app = GeneSnapApp()
     app.run()
 

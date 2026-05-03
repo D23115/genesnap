@@ -1,7 +1,7 @@
 """弹窗 UI：确认/修改识别结果、选择保存位置、手动输入、错误提示、加载进度"""
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QRadioButton, QButtonGroup, QPushButton, QMessageBox,
     QGroupBox, QFormLayout, QProgressBar,
 )
@@ -254,53 +254,68 @@ class SaveConfirmDialog(QDialog):
 
 
 class LoadingDialog(QDialog):
-    """OCR 模型加载进度对话框"""
+    """OCR 模型加载进度对话框（非模态，UI 不卡死）"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("GeneSnap - 启动中")
-        self.setFixedSize(420, 180)
+        self.setFixedSize(450, 200)
         self.setWindowFlags(
             Qt.WindowType.Dialog
-            | Qt.WindowType.CustomizeWindowHint
             | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowCloseButtonHint
         )
-        self.setModal(True)
+        # 非模态，保证事件循环正常运转
+        self.setModal(False)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(30, 24, 30, 24)
+        layout.setSpacing(14)
+        layout.setContentsMargins(28, 22, 28, 22)
 
-        # 图标 + 标题
-        header = QHBoxLayout()
-        icon_label = QLabel("🧬")
-        icon_label.setFont(QFont("", 28))
-        header.addWidget(icon_label)
-
+        # 标题
         title = QLabel("GeneSnap 正在启动")
         title_font = QFont()
         title_font.setBold(True)
-        title_font.setPointSize(14)
+        title_font.setPointSize(13)
         title.setFont(title_font)
-        header.addWidget(title)
-        header.addStretch()
-        layout.addLayout(header)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
 
-        # 进度条（循环滚动，表示不确定等待）
+        # 进度条（初始为不确定模式）
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # indeterminate mode
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("")
+        self.progress_bar.setFixedHeight(22)
         layout.addWidget(self.progress_bar)
 
         # 状态文字
-        self.status_label = QLabel("正在检查模型文件...")
+        self.status_label = QLabel("正在启动...")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("color: #555; font-size: 12px;")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("color: #333; font-size: 12px; padding: 4px;")
         layout.addWidget(self.status_label)
+
+        self._dot_count = 0
+
+    def set_progress(self, value: int, status: str = ""):
+        """value: -1 = 不确定(动画), 0-100 = 具体进度"""
+        if value < 0:
+            # 不确定模式：进度条来回滚动
+            self.progress_bar.setRange(0, 0)  # indeterminate
+            self.progress_bar.setFormat("")
+        else:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(value)
+            self.progress_bar.setFormat(f"{value}%")
+        if status:
+            self.status_label.setText(status)
+        QApplication.processEvents()  # 强制刷新 UI
 
     def update_status(self, msg: str):
         self.status_label.setText(msg)
+        QApplication.processEvents()
 
 
 def show_error(msg: str, parent=None):
