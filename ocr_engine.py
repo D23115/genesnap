@@ -87,10 +87,7 @@ def _init_ocr_background():
 
         try:
             from paddleocr import PaddleOCR
-            _ocr_instance = PaddleOCR(
-                lang=config.get("ocr_lang"),
-                use_angle_cls=True,
-            )
+            _ocr_instance = PaddleOCR(lang=config.get("ocr_lang"))
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
@@ -162,13 +159,26 @@ def ocr_image(pixmap: QPixmap) -> str:
     try:
         ocr = _get_ocr()
         results = ocr.ocr(path)
-        if not results or not results[0]:
+        if not results:
             return ""
 
         lines = []
-        for line_info in results[0]:
-            text = line_info[1][0]
-            lines.append(text)
+        for item in results:
+            # PaddleOCR 3.x: OCRResult 对象，有 rec_texts 属性
+            texts = getattr(item, "rec_texts", None)
+            if texts is None and isinstance(item, dict):
+                texts = item.get("rec_texts", [])
+            if texts:
+                lines.extend(texts)
+            elif isinstance(item, (list, tuple)):
+                # PaddleOCR 2.x: [[bbox, (text, confidence)], ...]
+                for line_info in item:
+                    if isinstance(line_info, (list, tuple)) and len(line_info) >= 2:
+                        text = line_info[1]
+                        if isinstance(text, (list, tuple)) and len(text) >= 1:
+                            lines.append(str(text[0]))
+                        else:
+                            lines.append(str(text))
         return "\n".join(lines)
     finally:
         try:

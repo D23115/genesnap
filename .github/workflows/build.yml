@@ -39,10 +39,14 @@ jobs:
             --add-data "dialogs.py;." `
             --add-data "screenshot_overlay.py;." `
             --hidden-import=paddleocr `
+            --hidden-import=paddleocr._pipelines.ocr `
+            --hidden-import=paddlex `
             --hidden-import=paddle `
             --hidden-import=openpyxl `
             --hidden-import=keyboard `
             --hidden-import=PySide6 `
+            --collect-all paddleocr `
+            --collect-all paddlex `
             --clean `
             --noconfirm
 
