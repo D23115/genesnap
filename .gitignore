@@ -1,0 +1,21 @@
+# Build outputs
+dist/
+build/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (may contain user paths)
+~/.genesnap_config.json

@@ -1,0 +1,54 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6 openpyxl keyboard pyinstaller
+          pip install paddlepaddle paddleocr
+
+      - name: Build EXE
+        run: |
+          pyinstaller main.py `
+            --name=GeneSnap `
+            --onefile `
+            --windowed `
+            --add-data "config.py;." `
+            --add-data "ocr_engine.py;." `
+            --add-data "info_extractor.py;." `
+            --add-data "excel_manager.py;." `
+            --add-data "folder_manager.py;." `
+            --add-data "image_saver.py;." `
+            --add-data "dialogs.py;." `
+            --add-data "screenshot_overlay.py;." `
+            --hidden-import=paddleocr `
+            --hidden-import=paddle `
+            --hidden-import=openpyxl `
+            --hidden-import=keyboard `
+            --hidden-import=PySide6 `
+            --clean `
+            --noconfirm
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeneSnap-Windows
+          path: dist/GeneSnap.exe
+          retention-days: 30
