@@ -5,6 +5,7 @@ import sys
 import re
 import threading
 import tempfile
+import traceback
 from io import StringIO
 
 from PySide6.QtCore import QObject, Signal
@@ -103,10 +104,11 @@ def _init_ocr_background():
             _init_result = (True, "")
 
     except Exception as e:
-        init_status = f"初始化失败: {e}"
+        tb = traceback.format_exc()
+        init_status = f"初始化失败: {e}\n{tb[-300:]}"
         init_progress = 0
         with _init_lock:
-            _init_result = (False, str(e))
+            _init_result = (False, f"{e}\n{tb}")
 
 
 def start_init():
@@ -164,14 +166,14 @@ def ocr_image(pixmap: QPixmap) -> str:
 
         lines = []
         for item in results:
-            # PaddleOCR 3.x: OCRResult 对象，有 rec_texts 属性
-            texts = getattr(item, "rec_texts", None)
-            if texts is None and isinstance(item, dict):
-                texts = item.get("rec_texts", [])
-            if texts:
-                lines.extend(texts)
-            elif isinstance(item, (list, tuple)):
-                # PaddleOCR 2.x: [[bbox, (text, confidence)], ...]
+            # PaddleOCR 3.x: OCRResult (UserDict-like), use .get()
+            if hasattr(item, "get"):
+                texts = item.get("rec_texts", []) or []
+                if texts:
+                    lines.extend(texts)
+                    continue
+            # PaddleOCR 2.x: [[bbox, (text, confidence)], ...]
+            if isinstance(item, (list, tuple)):
                 for line_info in item:
                     if isinstance(line_info, (list, tuple)) and len(line_info) >= 2:
                         text = line_info[1]

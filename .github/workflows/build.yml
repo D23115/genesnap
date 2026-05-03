@@ -38,15 +38,24 @@ jobs:
             --add-data "image_saver.py;." `
             --add-data "dialogs.py;." `
             --add-data "screenshot_overlay.py;." `
-            --hidden-import=paddleocr `
-            --hidden-import=paddleocr._pipelines.ocr `
-            --hidden-import=paddlex `
-            --hidden-import=paddle `
-            --hidden-import=openpyxl `
-            --hidden-import=keyboard `
-            --hidden-import=PySide6 `
             --collect-all paddleocr `
             --collect-all paddlex `
+            --collect-all paddle `
+            --collect-all opencv-contrib-python `
+            --collect-all cv2 `
+            --collect-all shapely `
+            --collect-all pyclipper `
+            --collect-all numpy `
+            --collect-all lxml `
+            --collect-all modelscope `
+            --collect-all huggingface_hub `
+            --hidden-import=paddleocr `
+            --hidden-import=paddlex `
+            --hidden-import=paddle `
+            --hidden-import=cv2 `
+            --hidden-import=shapely `
+            --hidden-import=pyclipper `
+            --hidden-import=numpy `
             --clean `
             --noconfirm
 
