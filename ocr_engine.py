@@ -1,24 +1,67 @@
-"""PaddleOCR 封装"""
+"""PaddleOCR 封装 + 后台初始化"""
 
-from PySide6.QtGui import QPixmap, QImage
-import tempfile
 import os
+import tempfile
 
+from PySide6.QtCore import QObject, Signal
+
+from PySide6.QtGui import QPixmap
+
+import config
 
 _ocr_instance = None
+_init_error = None
+
+
+class OcrInitWorker(QObject):
+    """后台线程初始化 PaddleOCR，避免主线程卡死"""
+
+    status_updated = Signal(str)
+    finished = Signal(bool, str)  # success, error_msg
+
+    def run(self):
+        global _ocr_instance, _init_error
+        try:
+            self._check_models()
+            _ocr_instance = self._create_ocr()
+            self.status_updated.emit("OCR 引擎就绪")
+            self.finished.emit(True, "")
+        except Exception as e:
+            _init_error = str(e)
+            self.finished.emit(False, str(e))
+
+    def _check_models(self):
+        """检查模型是否已缓存"""
+        cache_dir = os.path.expanduser("~/.paddlex/official_models")
+        if os.path.isdir(cache_dir):
+            entries = [
+                e for e in os.listdir(cache_dir)
+                if os.path.isdir(os.path.join(cache_dir, e))
+            ]
+            if len(entries) >= 5:
+                self.status_updated.emit("正在加载 OCR 模型...")
+                return
+        self.status_updated.emit("首次运行，正在下载 OCR 识别模型（约 50 MB）...")
+
+    def _create_ocr(self):
+        from paddleocr import PaddleOCR
+        return PaddleOCR(lang=config.get("ocr_lang"), use_angle_cls=True)
+
+
+def is_ocr_ready() -> bool:
+    return _ocr_instance is not None
 
 
 def _get_ocr():
     global _ocr_instance
     if _ocr_instance is None:
-        from paddleocr import PaddleOCR
-        import config
-        _ocr_instance = PaddleOCR(lang=config.get("ocr_lang"), use_angle_cls=True)
+        if _init_error:
+            raise RuntimeError(f"OCR 引擎初始化失败: {_init_error}")
+        raise RuntimeError("OCR 引擎尚未初始化完成")
     return _ocr_instance
 
 
 def _save_temp_png(pixmap: QPixmap) -> str:
-    """QPixmap 保存为临时 PNG 文件，返回路径"""
     image = pixmap.toImage()
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         path = f.name
@@ -27,13 +70,6 @@ def _save_temp_png(pixmap: QPixmap) -> str:
 
 
 def ocr_image(pixmap: QPixmap) -> str:
-    """
-    对截图进行 OCR 识别，返回原始文本。
-
-    输入：QPixmap 截图
-    输出：识别出的全部文本（换行分隔）
-    异常：OCR 失败时抛出
-    """
     path = _save_temp_png(pixmap)
     try:
         ocr = _get_ocr()

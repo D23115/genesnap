@@ -5,18 +5,18 @@ import traceback
 
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread
 
 import config
 from screenshot_overlay import ScreenshotOverlay
-from ocr_engine import ocr_image
+from ocr_engine import ocr_image, OcrInitWorker, is_ocr_ready
 from info_extractor import extract_order_info
 from excel_manager import find_gene_row, get_row_data, write_order_to_cell
 from folder_manager import build_folder_path, get_subfolder
 from image_saver import save_screenshot
 from dialogs import (
     ConfirmDialog, ManualInputDialog, SaveConfirmDialog,
-    show_error, show_gene_not_found,
+    LoadingDialog, show_error, show_gene_not_found,
 )
 
 
@@ -40,6 +40,52 @@ class GeneSnapApp:
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
 
+        self.tray = None
+        self.overlay = None
+        self._ocr_worker = None
+        self._ocr_thread = None
+
+        # 先显示加载对话框，后台初始化 OCR
+        self._init_ocr()
+
+    def _init_ocr(self):
+        loading = LoadingDialog()
+
+        self._ocr_thread = QThread()
+        self._ocr_worker = OcrInitWorker()
+        self._ocr_worker.moveToThread(self._ocr_thread)
+
+        self._ocr_thread.started.connect(self._ocr_worker.run)
+        self._ocr_worker.status_updated.connect(loading.update_status)
+        self._ocr_worker.finished.connect(
+            lambda ok, msg: self._on_ocr_ready(ok, msg, loading)
+        )
+        self._ocr_thread.finished.connect(self._ocr_worker.deleteLater)
+        self._ocr_thread.finished.connect(self._ocr_thread.deleteLater)
+
+        self._ocr_thread.start()
+        loading.exec()
+
+    def _on_ocr_ready(self, ok: bool, error_msg: str, loading: LoadingDialog):
+        loading.accept()
+        self._ocr_thread.quit()
+        self._ocr_thread.wait()
+        self._ocr_thread = None
+        self._ocr_worker = None
+
+        if not ok:
+            QMessageBox.critical(
+                None, "启动失败",
+                f"OCR 引擎初始化失败:\n{error_msg}\n\n"
+                "请检查网络连接后重新启动程序。"
+            )
+            self.app.quit()
+            return
+
+        # OCR 就绪，显示托盘
+        self._setup_tray()
+
+    def _setup_tray(self):
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(_make_tray_icon())
         self.tray.setToolTip("GeneSnap - 基因截图管理工具")
@@ -54,9 +100,14 @@ class GeneSnapApp:
         menu.addAction(quit_action)
         self.tray.setContextMenu(menu)
         self.tray.show()
-
-        self.overlay = None
         self._register_hotkey()
+
+        self.tray.showMessage(
+            "GeneSnap",
+            "已就绪，按 Ctrl+Shift+X 开始截图",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000,
+        )
 
     def _register_hotkey(self):
         try:
@@ -71,6 +122,15 @@ class GeneSnapApp:
     # ── 截图流程 ──────────────────────────────────────────────
 
     def start_screenshot(self):
+        if not is_ocr_ready():
+            self.tray.showMessage(
+                "GeneSnap",
+                "OCR 引擎尚未就绪，请稍候...",
+                QSystemTrayIcon.MessageIcon.Warning,
+                2000,
+            )
+            return
+
         self.overlay = ScreenshotOverlay()
         self.overlay.screenshot_taken.connect(self._on_screenshot)
         self.overlay.cancelled.connect(self._on_cancel)
@@ -91,7 +151,6 @@ class GeneSnapApp:
         self._cleanup_overlay()
         print(f"[GeneSnap] 截图完成: {pixmap.width()}x{pixmap.height()}")
 
-        # OCR 识别
         try:
             raw_text = ocr_image(pixmap)
         except Exception as e:
@@ -105,7 +164,6 @@ class GeneSnapApp:
 
         print(f"[GeneSnap] OCR 文本:\n{raw_text}")
 
-        # 提取信息
         info = extract_order_info(raw_text)
 
         if info is None:
@@ -132,7 +190,6 @@ class GeneSnapApp:
             self._show_manual_input(pixmap)
         elif action == "confirm":
             self._process_save(dlg.order_id, dlg.gene_name, dlg.order_type, pixmap)
-        # cancel → do nothing
 
     def _show_manual_input(self, pixmap: QPixmap):
         dlg = ManualInputDialog()
@@ -142,10 +199,9 @@ class GeneSnapApp:
     # ── Excel 查找 + 保存 ─────────────────────────────────────
 
     def _process_save(self, order_id: str, gene_name: str, order_type: str, pixmap: QPixmap):
-        # 1. 在 Excel 中查找基因名
         try:
             row = find_gene_row(gene_name)
-        except Exception as e:
+        except Exception:
             show_error(f"打开项目进度表失败，请确认文件未被其他程序占用。\n\n{traceback.format_exc()}")
             return
 
@@ -161,7 +217,6 @@ class GeneSnapApp:
             show_error("读取项目进度表失败。")
             return
 
-        # 2. 写入订单号
         try:
             write_order_to_cell(row, order_type, order_id)
             print(f"[GeneSnap] 已写入 {order_id} → 第{row}行 {order_type}")
@@ -169,14 +224,12 @@ class GeneSnapApp:
             show_error("写入订单号失败，请确认项目进度表未被其他程序占用。")
             return
 
-        # 3. 确定保存路径
         base_path = build_folder_path(
             serial=str(row_data["serial"] or ""),
             bom=str(row_data["bom"] or ""),
             gene=str(row_data["gene"] or gene_name),
         )
 
-        # 4. 弹窗②：确认保存位置
         dlg = SaveConfirmDialog(base_path, order_type)
         if not dlg.exec():
             return
@@ -187,7 +240,7 @@ class GeneSnapApp:
             print(f"[GeneSnap] 截图已保存: {saved}")
             self.tray.showMessage(
                 "GeneSnap",
-                f"已保存: {saved}",
+                f"已保存: {os.path.basename(saved)}",
                 QSystemTrayIcon.MessageIcon.Information,
                 3000,
             )
@@ -263,6 +316,7 @@ class GeneSnapApp:
 
 
 def main():
+    import os
     app = GeneSnapApp()
     app.run()
 

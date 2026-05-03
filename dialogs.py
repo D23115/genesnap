@@ -1,9 +1,9 @@
-"""弹窗 UI：确认/修改识别结果、选择保存位置、手动输入、错误提示"""
+"""弹窗 UI：确认/修改识别结果、选择保存位置、手动输入、错误提示、加载进度"""
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QRadioButton, QButtonGroup, QPushButton, QMessageBox,
-    QGroupBox, QFormLayout,
+    QGroupBox, QFormLayout, QProgressBar,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -251,6 +251,56 @@ class SaveConfirmDialog(QDialog):
     @property
     def subfolder(self):
         return "引物到货确认" if self.primer_radio.isChecked() else "测序确认"
+
+
+class LoadingDialog(QDialog):
+    """OCR 模型加载进度对话框"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("GeneSnap - 启动中")
+        self.setFixedSize(420, 180)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+        )
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+        layout.setContentsMargins(30, 24, 30, 24)
+
+        # 图标 + 标题
+        header = QHBoxLayout()
+        icon_label = QLabel("🧬")
+        icon_label.setFont(QFont("", 28))
+        header.addWidget(icon_label)
+
+        title = QLabel("GeneSnap 正在启动")
+        title_font = QFont()
+        title_font.setBold(True)
+        title_font.setPointSize(14)
+        title.setFont(title_font)
+        header.addWidget(title)
+        header.addStretch()
+        layout.addLayout(header)
+
+        # 进度条（循环滚动，表示不确定等待）
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # indeterminate mode
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(8)
+        layout.addWidget(self.progress_bar)
+
+        # 状态文字
+        self.status_label = QLabel("正在检查模型文件...")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: #555; font-size: 12px;")
+        layout.addWidget(self.status_label)
+
+    def update_status(self, msg: str):
+        self.status_label.setText(msg)
 
 
 def show_error(msg: str, parent=None):
